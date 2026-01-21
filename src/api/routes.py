@@ -2,7 +2,7 @@
 This module takes care of starting the API Server, Loading the DB and Adding the endpoints
 """
 from flask import Flask, request, jsonify, url_for, Blueprint
-from api.models import db, User, Emotion, EmotionCheckin, Activity, ActivityCompletion
+from api.models import db, User, Emotion, EmotionCheckin, Activity, ActivityCompletion, DailySession
 from api.utils import generate_sitemap, APIException
 from flask_cors import CORS
 from datetime import datetime
@@ -66,18 +66,59 @@ def register():
     }), 201
 
 
+####### GET Y DELETE Users
+
+### GET Users
+@api.route("/users", methods=["GET"])
+def get_emotions():
+    users = User.query.all()
+    return jsonify([u.serialize() for u in users])
+
+
+### DELETE Users
+
+@api.route("/users/<int:user_id>", methods=["DELETE"])
+def delete_user(user_id):
+    user = User.query.get(user_id)
+
+    db.session.delete(user)
+    db.session.commit()
+    user_deleted = {"msg": "User deleted"}
+
+    return jsonify(user_deleted), 200
 
 ###### DAILY SESSION 
 
+@api.route("/sessions/<int:session_id>", methods=["POST"])
+def get_or_create_session():
+    data = request.json
+    user_id = data["user_id"]
+    session_type = data["session_type"]
+    today = datetime.today()
 
+    daily_session = DailySession.query.filter_by(
+        user_id=user_id,
+        session_date=today,
+        session_type=session_type
+    ).first()
 
+    if not daily_session:
+        daily_session = DailySession(
+            user_id=user_id,
+            session_date=today,
+            session_type=session_type
+        )
+        db.session.add(daily_session)
+        db.session.commit()
+
+    return jsonify(daily_session.serialize())
 
 
 ###### Emotions y Checkins
 
 ### GET Emotions
 
-@api.route("/emotions", methods=["GET"])
+@api.route("/emotion", methods=["GET"])
 def get_emotions():
     emotions = Emotion.query.all()
     return jsonify([e.serialize() for e in emotions])
@@ -86,12 +127,12 @@ def get_emotions():
 
 @api.route("/sessions/<int:session_id>/emotion-checkin", methods=["POST"])
 def create_emotion_checkin(session_id):
-    data = request.json
+    request_data = request.json
 
     checkin = EmotionCheckin(
         daily_session_id=session_id,
-        emotion_id=data["emotion_id"],
-        note=data.get("note")
+        emotion_id=request_data["emotion_id"],
+        note=request_data.get("note")
     )
 
     db.session.add(checkin)
@@ -126,8 +167,6 @@ def get_session_emotion_music(daily_session_id):
     }), 200
 
 
-
-
 ###### Activity y Completions
 
 ### GET Activities 
@@ -140,29 +179,28 @@ def get_activities():
 
 ### POST Completion
 
-@api.route("/sessions/<int:session_id>/activity-completion", methods=["POST"])
+@api.route("/sessions/<int:session_id>/activity-completed", methods=["POST"])
 def complete_activity(session_id):
-    data = request.json
+    request_data = request.json
 
-    activity_completion = ActivityCompletion(
+    activity_completed = ActivityCompletion(
         daily_session_id=session_id,
-        activity_id=data["activity_id"],
-        points_awarded=data.get("points_awarded", 0)
+        activity_id=request_data["activity_id"],
+        points_awarded=request_data.get("points_awarded", 0)
     )
 
-    db.session.add(activity_completion)
+    db.session.add(activity_completed)
     db.session.commit()
 
     return jsonify({
         "msg": "activity completed",
-        "completion": activity_completion.serialize()
+        "completion": activity_completed.serialize()
     }), 201
-
 
 
 ### GET Activities Completed
 
 @api.route("/sessions/<int:session_id>/activity-completions", methods=["GET"])
 def get_activity_completions(session_id):
-    act_completed = ActivityCompletion.query.filter_by(daily_session_id=session_id).all()
-    return jsonify([ac.serialize() for ac in act_completed])
+    activities_completed = ActivityCompletion.query.filter_by(daily_session_id=session_id).all()
+    return jsonify([ac.serialize() for ac in activities_completed])
