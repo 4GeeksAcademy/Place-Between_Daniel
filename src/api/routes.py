@@ -89,9 +89,10 @@ def delete_user(user_id):
 
     return jsonify(user_deleted), 200
 
+
 ###### DAILY SESSION 
 
-@api.route("/sessions/<int:session_id>", methods=["POST"])
+@api.route("/users/<int:user_id>/sessions/<int:session_id>", methods=["POST"])
 @jwt_required()
 def get_or_create_session():
     request_data = request.json
@@ -148,7 +149,7 @@ def get_user_emotions():
 
 ### POST Emotions Checkin
 
-@api.route("/sessions/<int:session_id>/emotions-checkin", methods=["POST"])
+@api.route("/users/<int:user_id>/sessions/<int:session_id>/emotions-checkin", methods=["POST"])
 def create_emotions_checkin(daily_session_id):
     request_data = request.json
 
@@ -170,7 +171,7 @@ def create_emotions_checkin(daily_session_id):
 
 DEFAULT_TRACK = "https://soundcloud.com/clubfuriess/default-track"
 
-@api.route("/sessions/<int:session_id>/emotion-music", methods=["GET"])
+@api.route("/users/<int:user_id>/sessions/<int:session_id>/emotion-music", methods=["GET"])
 def get_session_emotion_music(daily_session_id):
     checkin = (
         EmotionCheckin.query.filter_by(daily_session_id=daily_session_id)
@@ -202,7 +203,7 @@ def get_activities():
 
 ### POST Completion
 
-@api.route("/sessions/<int:session_id>/activity-completed", methods=["POST"])
+@api.route("/users/<int:user_id>/sessions/<int:session_id>/activity-completed", methods=["POST"])
 def complete_activity(daily_session_id):
     request_data = request.json
 
@@ -223,7 +224,7 @@ def complete_activity(daily_session_id):
 
 ### GET Activities Completed
 
-@api.route("/sessions/<int:session_id>/activity-completions", methods=["GET"])
+@api.route("/users/<int:user_id>/sessions/<int:session_id>/activity-completions", methods=["GET"])
 def get_activity_completions(daily_session_id):
     activities_completed = ActivityCompletion.query.filter_by(daily_session_id=daily_session_id).all()
     return jsonify([ac.serialize() for ac in activities_completed])
