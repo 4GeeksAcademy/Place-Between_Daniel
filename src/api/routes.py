@@ -2,7 +2,7 @@
 This module takes care of starting the API Server, Loading the DB and Adding the endpoints
 """
 from flask import Flask, request, jsonify, url_for, Blueprint
-from api.models import db, User, DailySession, ActivityCompletion, EmotionCheckin, DailySession
+from api.models import db, User, DailySession, Activity, ActivityCompletion, Emotion, EmotionCheckin, DailySession
 from api.utils import generate_sitemap, APIException
 from flask_cors import CORS
 from datetime import datetime ,timedelta
@@ -85,11 +85,90 @@ def login():
     # actualiza last_login_at
     user.last_login_at = datetime.utcnow()
 
+    if remember_me:
+        expires = timedelta(days=30)
+    else:
+        expires = timedelta(hours=24)
+
+    # crea token
+    access_token = create_access_token(identity=str(user.id),expires_delta=expires)
+
+    return jsonify({
+        "access_token": access_token,
+        "user": user.serialize()
+    }), 200
+
+
+@api.route("/mirror/today", methods=["GET"])
+@jwt_required()
+def mirror_today():
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({"msg": "Usuario no encontrado"}), 404
+
+    today = datetime.utcnow().date()
+
+    # buscar cualquier sesión de hoy (day o night)
+    session = DailySession.query.filter_by(
+        user_id=user.id,
+        session_date=today
+    ).first()
+
+    # 🟡 Caso: no hay sesión hoy
+    if not session:
+        return jsonify({
+            "date": today.isoformat(),
+            "session_type": None,
+            "points_today": 0,
+            "activities": [],
+            "emotion": None,
+            "message": "Aún no has registrado actividades ni emociones hoy"
+        }), 200
+
+    # actividades
+    completions = ActivityCompletion.query.filter_by(
+        daily_session_id=session.id
+    ).all()
+
+    activities = []
+    for c in completions:
+        activities.append({
+            "id": c.activity.id,
+            "name": c.activity.name,
+            "points": c.points_awarded
+        })
+
+    # emoción principal (última registrada)
+    emotion_checkin = (
+        EmotionCheckin.query
+        .filter_by(daily_session_id=session.id)
+        .order_by(EmotionCheckin.created_at.desc())
+        .first()
+    )
+
+    emotion = None
+    if emotion_checkin:
+        emotion = {
+            "name": emotion_checkin.emotion.name,
+            "intensity": emotion_checkin.intensity
+        }
+
+    return jsonify({
+        "date": today.isoformat(),
+        "session_type": session.session_type.value,
+        "points_today": session.points_earned,
+        "activities": activities,
+        "emotion": emotion
+    }), 200
+
+
 ####### GET Y DELETE Users
 
 ### GET Users
 @api.route("/users", methods=["GET"])
-def get_emotions():
+def get_all_users():
     users = User.query.all()
     return jsonify([u.serialize() for u in users])
 
@@ -142,7 +221,7 @@ def get_or_create_session():
 ### GET Emotions
 
 @api.route("/emotions", methods=["GET"])
-def get_emotions():
+def get_all_emotions():
     emotions = Emotion.query.all()
     return jsonify([e.serialize() for e in emotions])
 
@@ -165,10 +244,18 @@ def get_user_emotions():
     return jsonify(user_emotions)
 
 
+### GET Emotion Checkins
+
+@api.route("/sessions/<int:session_id>/emotion-checkins", methods=["GET"])
+def get_user_emotion_checkins(daily_session_id):
+    emotion_checkins = EmotionCheckin.query.filter_by(daily_session_id=daily_session_id).all()
+    return jsonify([ec.serialize() for ec in emotion_checkins])
+
+
 ### POST Emotions Checkin
 
-@api.route("/users/<int:user_id>/sessions/<int:session_id>/emotions-checkin", methods=["POST"])
-def create_emotions_checkin(daily_session_id):
+@api.route("/users/<int:user_id>/sessions/<int:session_id>/emotion-checkin", methods=["POST"])
+def create_emotion_checkin(daily_session_id):
     request_data = request.json
 
     checkin = EmotionCheckin(
@@ -180,20 +267,12 @@ def create_emotions_checkin(daily_session_id):
     db.session.add(checkin)
     db.session.commit()
 
-    if remember_me:
-        expires = timedelta(days=30)
-    else:
-        expires = timedelta(hours=24)
-
-    # crea token
-    access_token = create_access_token(identity=str(user.id),expires_delta=expires)
-
     return jsonify({
         "msg": "emotion checkin created",
         "checkin": checkin.serialize()
     }), 201
 
-### GET MUSIC
+### GET EMOTION MUSIC
 
 DEFAULT_TRACK = "https://soundcloud.com/clubfuriess/default-track"
 
@@ -204,18 +283,48 @@ def get_session_emotion_music(daily_session_id):
         .order_by(EmotionCheckin.created_at.desc())
         .first()
     )
-
-    emotion = None
-    if emotion_checkin:
-        emotion = {
-            "name": emotion_checkin.emotion.name,
-            "intensity": emotion_checkin.intensity
-        }
+    if not checkin or not checkin.emotion:
+        return jsonify({
+            "emotion": None,
+            "url_music": DEFAULT_TRACK
+        }), 200
 
     return jsonify({
-        "date": today.isoformat(),
-        "session_type": session.session_type.value,
-        "points_today": session.points_earned,
-        "activities": activities,
-        "emotion": emotion
+        "emotion": checkin.emotion.name,
+        "url_music": checkin.emotion.url_music or DEFAULT_TRACK
     }), 200
+
+
+### GET Activities 
+
+@api.route("/activities", methods=["GET"])
+def get_all_activities():
+    activities = Activity.query.filter_by(is_active=True).all()
+    return jsonify([a.serialize() for a in activities])
+
+### GET Activity Completion
+
+@api.route("/sessions/<int:session_id>/activity-completions", methods=["GET"])
+def get_activity_completions(daily_session_id):
+    activity_completions = ActivityCompletion.query.filter_by(daily_session_id=daily_session_id).all()
+    return jsonify([c.serialize() for c in activity_completions])
+
+### POST Activity Completion
+
+@api.route("/users/<int:user_id>/sessions/<int:session_id>/activity-completion", methods=["POST"])
+def complete_activity(daily_session_id):
+    request_data = request.json
+
+    activity_completion = ActivityCompletion(
+        daily_session_id=daily_session_id,
+        activity_id=request_data["activity_id"],
+        points_awarded=request_data.get("points_awarded", 0)
+    )
+
+    db.session.add(activity_completion)
+    db.session.commit()
+
+    return jsonify({
+        "msg": "activity completed",
+        "completion": activity_completion.serialize()
+    }), 201
