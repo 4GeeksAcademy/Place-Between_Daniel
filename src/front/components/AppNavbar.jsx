@@ -1,6 +1,7 @@
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { logout } from "../services/authService";
 
+
 const LogoMark = ({ size = 22 }) => (
 	<svg width={size} height={size} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
 		<path d="M32 6L58 22L32 58L6 22L32 6Z" fill="currentColor" opacity="0.18" />
@@ -11,7 +12,6 @@ const LogoMark = ({ size = 22 }) => (
 
 export const AppNavbar = () => {
 	const navigate = useNavigate();
-
 	const handleLogout = () => {
 		logout();
 		navigate("/");

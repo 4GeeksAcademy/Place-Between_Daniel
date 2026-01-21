@@ -1,13 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { getToken } from "../services/authService";
+import { useNavigate } from "react-router-dom";
+
 
 export const Today = () => {
+    const navigate = useNavigate();
     const [mirror, setMirror] = useState(null);
     const [error, setError] = useState("");
 
     useEffect(() => {
         const token = getToken();
-        if (!token) return;
+        if (!token) navigate("/");
 
         fetch(`${import.meta.env.VITE_BACKEND_URL || ""}/api/mirror/today`, {
             headers: { Authorization: `Bearer ${token}` },
