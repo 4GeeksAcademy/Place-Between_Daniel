@@ -158,7 +158,7 @@ export const Home = () => {
 										<div className="pb-icon bg-info bg-opacity-15 text-info">🌙</div>
 										<h3 className="h5 fw-bold mt-3">Cierra el día</h3>
 										<p className="text-secondary mb-0">
-											Noche: eliges emoción (4 básicas) y haces una reflexión breve.
+											Noche: identificas tu emoción y hacemos una reflexión breve.
 										</p>
 									</div>
 								</div>
@@ -279,7 +279,7 @@ export const Home = () => {
 										</div>
 									</div>
 									<div className="small text-secondary mt-2">
-										Mock visual (datos reales en Sprint 1).
+										Mock visual (datos reales en Sprint 2).
 									</div>
 								</div>
 							</div>
