@@ -14,7 +14,7 @@ export const AppNavbar = () => {
 	const navigate = useNavigate();
 	const handleLogout = () => {
 		logout();
-		navigate("/");
+		navigate("/auth/login", { replace: true }); // Redirige al usuario a la página de login después de cerrar sesión
 	};
 
 	return (
