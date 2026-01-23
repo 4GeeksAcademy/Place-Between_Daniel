@@ -5,8 +5,12 @@ from flask import Flask, request, jsonify, url_for, Blueprint
 from api.models import db, User, DailySession, ActivityCompletion, EmotionCheckin
 from api.utils import generate_sitemap, APIException
 from flask_cors import CORS
-from datetime import datetime ,timedelta
+from datetime import datetime, timedelta
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
+from api.service_loops.welcome_user import send_welcome_transactional , LoopsError
+from api.service_loops.reset_password import send_password_reset
+import os
+from werkzeug.security import generate_password_hash
 
 api = Blueprint('api', __name__)
 
@@ -22,6 +26,7 @@ def handle_hello():
     }
 
     return jsonify(response_body), 200
+
 
 @api.route('/register', methods=['POST'])
 def register():
@@ -57,14 +62,28 @@ def register():
     db.session.commit()
 
     # TODO: Aquí luego llamas a Loops.so para welcome email
-    # loops_service.send_welcome_email(user.email, user.username)
-    # user.welcome_email_sent_at = datetime.utcnow()
-    # db.session.commit()
+    try:
+        transactional_id = os.getenv("LOOPS_WELCOME_TRANSACTIONAL_ID")
+        if not transactional_id:
+            raise LoopsError("Falta LOOPS_WELCOME_TRANSACTIONAL_ID en el .env")
+
+        print(">>> Loops: enviando welcome a:", user.email)
+        print(">>> Loops: transactional_id:", transactional_id)
+
+        send_welcome_transactional(
+            email=user.email,
+            transactional_id=transactional_id,
+            data=user.username
+        )
+
+    except Exception as e:
+        print("Error Loops (debug):", repr(e))
 
     return jsonify({
         "msg": "Usuario creado",
         "user": user.serialize()
     }), 201
+
 
 @api.route('/login', methods=['POST'])
 def login():
@@ -81,7 +100,6 @@ def login():
     if not user or not user.check_password(password):
         return jsonify({"msg": "Credenciales inválidas"}), 401
 
-
     # actualiza last_login_at
     user.last_login_at = datetime.utcnow()
     db.session.commit()
@@ -92,12 +110,50 @@ def login():
         expires = timedelta(hours=24)
 
     # crea token
-    access_token = create_access_token(identity=str(user.id),expires_delta=expires)
+    access_token = create_access_token(
+        identity=str(user.id), expires_delta=expires)
 
     return jsonify({
         "access_token": access_token,
         "user": user.serialize()
     }), 200
+
+
+@api.route('/reset/password', methods=['POST'])
+def reset_password():
+    email = request.json.get('email',None)
+
+    if not email:
+        return jsonify({"msg": "email es obligatorio"}), 400
+
+
+    generic = {"msg": "Si el email existe, recibirás un enlace para restablecer tu contraseña."}
+    token = create_access_token(identity=email)
+
+    app_url = "www.google.com" + "/reset?token=" + token
+    
+    send_password_reset(email, app_url)
+
+    return jsonify(generic,app_url), 200
+
+@api.route('/change/password', methods=['POST'])
+@jwt_required()
+def change_password():
+
+    password =request.json.get('password',None)
+    email = get_jwt_identity()
+
+    user = User.query.filter_by(email=email).first()
+
+    if user is None:
+        return jsonify({"msg" :"Usuario no encontrado"}),400
+    
+    user.password = generate_password_hash(password)
+    db.session.add(user)
+    db.session.commit()
+
+    return jsonify({"Success": True}), 200
+
 
 @api.route("/mirror/today", methods=["GET"])
 @jwt_required()
@@ -162,3 +218,7 @@ def mirror_today():
         "activities": activities,
         "emotion": emotion
     }), 200
+
+
+print(send_password_reset("alonsoisidro@gmail.com",
+      "http://localhost:3000/reset-password?token=123"))
