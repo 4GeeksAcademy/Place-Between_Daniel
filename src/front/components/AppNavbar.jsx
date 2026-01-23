@@ -12,9 +12,14 @@ const LogoMark = ({ size = 22 }) => (
 
 export const AppNavbar = () => {
 	const navigate = useNavigate();
+
 	const handleLogout = () => {
+		// Solo credenciales
+		localStorage.removeItem("pb_token");
+		localStorage.removeItem("pb_user");
+
 		logout();
-		navigate("/auth/login", { replace: true }); // Redirige al usuario a la página de login después de cerrar sesión
+		navigate("/auth/login", { replace: true });
 	};
 
 	return (

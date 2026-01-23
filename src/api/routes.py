@@ -1,72 +1,71 @@
-"""
-This module takes care of starting the API Server, Loading the DB and Adding the endpoints
-"""
-from flask import Flask, request, jsonify, url_for, Blueprint
-from api.models import db, User, DailySession, Activity, ActivityCompletion, Emotion, EmotionCheckin, DailySession
-from api.utils import generate_sitemap, APIException
+from flask import request, jsonify, Blueprint
+from api.models import (
+    db,
+    User,
+    DailySession,
+    Activity,
+    ActivityCompletion,
+    Emotion,
+    EmotionCheckin,
+    SessionType,
+    ActivityCategory,
+    ActivityType,
+)
 from flask_cors import CORS
-from datetime import datetime ,timedelta
+from datetime import datetime, timedelta, timezone
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 
-api = Blueprint('api', __name__)
-
-# Allow CORS requests to this API
+api = Blueprint("api", __name__)
 CORS(api)
 
 
-@api.route('/hello', methods=['POST', 'GET'])
+@api.route("/hello", methods=["POST", "GET"])
 def handle_hello():
+    return jsonify({
+        "message": "Hello! I'm a message that came from the backend."
+    }), 200
 
-    response_body = {
-        "message": "Hello! I'm a message that came from the backend, check the network tab on the google inspector and you will see the GET request"
-    }
 
-    return jsonify(response_body), 200
+# -------------------------
+# AUTH
+# -------------------------
 
-@api.route('/register', methods=['POST'])
+@api.route("/register", methods=["POST"])
 def register():
-    body = request.get_json()
+    body = request.get_json(silent=True) or {}
 
     email = (body.get("email") or "").strip().lower()
     username = (body.get("username") or "").strip()
     password = body.get("password") or ""
-    timezone = (body.get("timezone") or "UTC").strip()
+    tz_str = (body.get("timezone") or "UTC").strip()
 
-    # Validaciones basicas
     if not email or not username or not password:
         return jsonify({"msg": "email, username y password son obligatorios"}), 400
 
-    # Evitar duplicados
     if User.query.filter_by(email=email).first():
         return jsonify({"msg": "Ese email ya está registrado"}), 409
 
     if User.query.filter_by(username=username).first():
         return jsonify({"msg": "Ese username ya está registrado"}), 409
 
-    # Crear usuario
     user = User(
         email=email,
         username=username,
-        timezone=timezone,
-        created_at=datetime.utcnow(),
+        timezone=tz_str,
+        created_at=datetime.now(timezone.utc),
     )
-
     user.set_password(password)
 
     db.session.add(user)
     db.session.commit()
-
-    # TODO: Aquí luego llamas a Loops.so para welcome email
-    # loops_service.send_welcome_email(user.email, user.username)
-    # user.welcome_email_sent_at = datetime.utcnow()
-    # db.session.commit()
 
     return jsonify({
         "msg": "Usuario creado",
         "user": user.serialize()
     }), 201
 
-@api.route('/login', methods=['POST'])
+
+@api.route("/login", methods=["POST"])
 def login():
     body = request.get_json(silent=True) or {}
 
@@ -81,17 +80,13 @@ def login():
     if not user or not user.check_password(password):
         return jsonify({"msg": "Credenciales inválidas"}), 401
 
+    # Persist last_login_at
+    user.last_login_at = datetime.now(timezone.utc)
+    db.session.commit()
 
-    # actualiza last_login_at
-    user.last_login_at = datetime.utcnow()
-
-    if remember_me:
-        expires = timedelta(days=30)
-    else:
-        expires = timedelta(hours=24)
-
-    # crea token
-    access_token = create_access_token(identity=str(user.id),expires_delta=expires)
+    expires = timedelta(days=30) if remember_me else timedelta(hours=24)
+    access_token = create_access_token(
+        identity=str(user.id), expires_delta=expires)
 
     return jsonify({
         "access_token": access_token,
@@ -99,232 +94,549 @@ def login():
     }), 200
 
 
-@api.route("/mirror/today", methods=["GET"])
+# -------------------------
+# SESSIONS (MINIMAL, CLEAN)
+# -------------------------
+@api.route("/sessions", methods=["POST"])
 @jwt_required()
-def mirror_today():
-    user_id = get_jwt_identity()
-    user = User.query.get(user_id)
+def create_or_get_session():
+    """
+    Body:
+      {
+        "session_type": "day" | "night",
+        "date": "YYYY-MM-DD" (optional, defaults to today UTC)
+      }
+    """
+    body = request.get_json(silent=True) or {}
 
+    session_type_raw = (body.get("session_type") or "").strip().lower()
+    if session_type_raw not in ("day", "night"):
+        return jsonify({"msg": "session_type debe ser 'day' o 'night'"}), 400
+
+    date_raw = (body.get("date") or "").strip()
+    if date_raw:
+        try:
+            session_date = datetime.strptime(date_raw, "%Y-%m-%d").date()
+        except ValueError:
+            return jsonify({"msg": "date debe tener formato YYYY-MM-DD"}), 400
+    else:
+        session_date = datetime.now(timezone.utc).date()
+
+    user_id = get_jwt_identity()
+    try:
+        user_id_int = int(user_id)
+    except Exception:
+        return jsonify({"msg": "Token inválido (identity)"}), 401
+
+    user = User.query.get(user_id_int)
     if not user:
         return jsonify({"msg": "Usuario no encontrado"}), 404
 
-    today = datetime.utcnow().date()
+    st_enum = SessionType.day if session_type_raw == "day" else SessionType.night
 
-    # buscar cualquier sesión de hoy (day o night)
     session = DailySession.query.filter_by(
         user_id=user.id,
-        session_date=today
+        session_date=session_date,
+        session_type=st_enum
     ).first()
 
-    # 🟡 Caso: no hay sesión hoy
     if not session:
+        session = DailySession(
+            user_id=user.id,
+            session_date=session_date,
+            session_type=st_enum
+        )
+        db.session.add(session)
+        db.session.commit()
+
+    return jsonify(session.serialize()), 200
+
+
+# -------------------------
+# MIRROR (STABLE)
+# -------------------------
+@api.route("/mirror/today", methods=["GET"])
+@jwt_required()
+def mirror_today():
+    """
+    Optional query:
+      ?session_type=day|night   (if omitted, returns combined summary for today)
+    """
+    user_id = get_jwt_identity()
+    try:
+        user_id_int = int(user_id)
+    except Exception:
+        return jsonify({"msg": "Token inválido (identity)"}), 401
+
+    user = User.query.get(user_id_int)
+    if not user:
+        return jsonify({"msg": "Usuario no encontrado"}), 404
+
+    today = datetime.now(timezone.utc).date()
+    session_type_q = (request.args.get("session_type") or "").strip().lower()
+
+    sessions_q = DailySession.query.filter_by(
+        user_id=user.id, session_date=today)
+
+    if session_type_q in ("day", "night"):
+        st_enum = SessionType.day if session_type_q == "day" else SessionType.night
+        sessions = sessions_q.filter_by(session_type=st_enum).all()
+    else:
+        sessions = sessions_q.all()
+
+    if not sessions:
         return jsonify({
             "date": today.isoformat(),
-            "session_type": None,
+            "sessions": [],
             "points_today": 0,
             "activities": [],
             "emotion": None,
             "message": "Aún no has registrado actividades ni emociones hoy"
         }), 200
 
-    # actividades
-    completions = ActivityCompletion.query.filter_by(
-        daily_session_id=session.id
-    ).all()
+    # Aggregate across sessions
+    points_today = sum(s.points_earned or 0 for s in sessions)
 
+    # Activities across sessions
     activities = []
-    for c in completions:
-        activities.append({
-            "id": c.activity.id,
-            "name": c.activity.name,
-            "points": c.points_awarded
-        })
+    for s in sessions:
+        completions = ActivityCompletion.query.filter_by(
+            daily_session_id=s.id).all()
+        for c in completions:
+            # c.activity puede estar lazy-loaded; asumimos relación OK
+            activities.append({
+                "id": c.activity.id,
+                "name": c.activity.name,
+                "points": c.points_awarded,
+                "session_type": s.session_type.value,
+                "completed_at": c.completed_at.isoformat() + "Z"
+            })
 
-    # emoción principal (última registrada)
-    emotion_checkin = (
+    # Latest emotion checkin across sessions
+    latest_checkin = (
         EmotionCheckin.query
-        .filter_by(daily_session_id=session.id)
+        .join(DailySession, EmotionCheckin.daily_session_id == DailySession.id)
+        .filter(DailySession.user_id == user.id, DailySession.session_date == today)
         .order_by(EmotionCheckin.created_at.desc())
         .first()
     )
 
     emotion = None
-    if emotion_checkin:
+    if latest_checkin and latest_checkin.emotion:
         emotion = {
-            "name": emotion_checkin.emotion.name,
-            "intensity": emotion_checkin.intensity
+            "name": latest_checkin.emotion.name,
+            # No existe intensity en el modelo; devolvemos campos reales:
+            "note": latest_checkin.note,
+            "value": latest_checkin.emotion.value,
+            "created_at": latest_checkin.created_at.isoformat() + "Z"
         }
 
     return jsonify({
         "date": today.isoformat(),
-        "session_type": session.session_type.value,
-        "points_today": session.points_earned,
+        "sessions": [s.serialize() for s in sessions],
+        "points_today": points_today,
         "activities": activities,
         "emotion": emotion
     }), 200
 
 
-####### GET Y DELETE Users
-
-### GET Users
-@api.route("/users", methods=["GET"])
-def get_all_users():
-    users = User.query.all()
-    return jsonify([u.serialize() for u in users])
-
-
-### DELETE Users
-
-@api.route("/users/<int:user_id>", methods=["DELETE"])
-def delete_user(user_id):
-    user_id = get_jwt_identity()
-    user = User.query.get(user_id)
-
-    db.session.delete(user)
-    db.session.commit()
-    user_deleted = {"msg": "User deleted"}
-
-    return jsonify(user_deleted), 200
-
-
-###### DAILY SESSION 
-
-@api.route("/users/<int:user_id>/sessions/<int:session_id>", methods=["POST"])
-@jwt_required()
-def get_or_create_session():
-    request_data = request.json
-    user_id = get_jwt_identity()
-    user = User.query.get(user_id)
-    session_type = request_data["session_type"]
-    today = datetime.today()
-
-    daily_session = DailySession.query.filter_by(
-        user_id=user,
-        session_date=today,
-        session_type=session_type
-    ).first()
-
-    if not daily_session:
-        daily_session = DailySession(
-            user_id=user,
-            session_date=today,
-            session_type=session_type
-        )
-        db.session.add(daily_session)
-        db.session.commit()
-
-    return jsonify(daily_session.serialize())
-
-
-###### Emotions y Checkins
-
-### GET Emotions
-
+# -------------------------
+# READ-ONLY LISTS (safe)
+# -------------------------
 @api.route("/emotions", methods=["GET"])
 def get_all_emotions():
     emotions = Emotion.query.all()
-    return jsonify([e.serialize() for e in emotions])
+    return jsonify([e.serialize() for e in emotions]), 200
 
-### GET User Emotion
-
-@api.route("/users/<int:user_id>/emotions", methods=["GET"])
-def get_user_emotions():
-    request_data = request.json
-    user_id = get_jwt_identity()
-    user = User.query.get(user_id)
-    
-    emotions = EmotionCheckin(
-        user_id=user,
-        emotion_id=request_data["emotion_id"],
-        description=request_data.get("description")
-    )
-
-    user_emotions = [e.serialize() for e in emotions]
-
-    return jsonify(user_emotions)
-
-
-### GET Emotion Checkins
-
-@api.route("/sessions/<int:session_id>/emotion-checkins", methods=["GET"])
-def get_user_emotion_checkins(daily_session_id):
-    emotion_checkins = EmotionCheckin.query.filter_by(daily_session_id=daily_session_id).all()
-    return jsonify([ec.serialize() for ec in emotion_checkins])
-
-
-### POST Emotions Checkin
-
-@api.route("/users/<int:user_id>/sessions/<int:session_id>/emotion-checkin", methods=["POST"])
-def create_emotion_checkin(daily_session_id):
-    request_data = request.json
-
-    checkin = EmotionCheckin(
-        daily_session_id=daily_session_id,
-        emotion_id=request_data["emotion_id"],
-        note=request_data.get("note")
-    )
-
-    db.session.add(checkin)
-    db.session.commit()
-
-    return jsonify({
-        "msg": "emotion checkin created",
-        "checkin": checkin.serialize()
-    }), 201
-
-### GET EMOTION MUSIC
-
-DEFAULT_TRACK = "https://soundcloud.com/clubfuriess/default-track"
-
-@api.route("/users/<int:user_id>/sessions/<int:session_id>/emotion-music", methods=["GET"])
-def get_session_emotion_music(daily_session_id):
-    checkin = (
-        EmotionCheckin.query.filter_by(daily_session_id=daily_session_id)
-        .order_by(EmotionCheckin.created_at.desc())
-        .first()
-    )
-    if not checkin or not checkin.emotion:
-        return jsonify({
-            "emotion": None,
-            "url_music": DEFAULT_TRACK
-        }), 200
-
-    return jsonify({
-        "emotion": checkin.emotion.name,
-        "url_music": checkin.emotion.url_music or DEFAULT_TRACK
-    }), 200
-
-
-### GET Activities 
 
 @api.route("/activities", methods=["GET"])
 def get_all_activities():
     activities = Activity.query.filter_by(is_active=True).all()
-    return jsonify([a.serialize() for a in activities])
+    return jsonify([a.serialize() for a in activities]), 200
 
-### GET Activity Completion
 
-@api.route("/sessions/<int:session_id>/activity-completions", methods=["GET"])
-def get_activity_completions(daily_session_id):
-    activity_completions = ActivityCompletion.query.filter_by(daily_session_id=daily_session_id).all()
-    return jsonify([c.serialize() for c in activity_completions])
+@api.route("/activities/complete", methods=["POST"])
+@jwt_required()
+def complete_activity():
+    body = request.get_json(silent=True) or {}
 
-### POST Activity Completion
+    external_id = body.get("external_id")
+    session_type = body.get("session_type")  # "day" | "night"
+    is_recommended = body.get("is_recommended", False)
 
-@api.route("/users/<int:user_id>/sessions/<int:session_id>/activity-completion", methods=["POST"])
-def complete_activity(daily_session_id):
-    request_data = request.json
+    if not external_id or session_type not in ("day", "night"):
+        return jsonify({"msg": "Datos incompletos"}), 400
 
-    activity_completion = ActivityCompletion(
-        daily_session_id=daily_session_id,
-        activity_id=request_data["activity_id"],
-        points_awarded=request_data.get("points_awarded", 0)
+    user_id = int(get_jwt_identity())
+    today = datetime.now(timezone.utc).date()
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"msg": "Usuario no encontrado"}), 404
+
+    activity = Activity.query.filter_by(
+        external_id=external_id,
+        is_active=True
+    ).first()
+
+    if not activity:
+        return jsonify({"msg": "Actividad no encontrada"}), 404
+
+    st_enum = (
+        SessionType.day if session_type == "day"
+        else SessionType.night
     )
 
-    db.session.add(activity_completion)
+    session = DailySession.query.filter_by(
+        user_id=user.id,
+        session_date=today,
+        session_type=st_enum
+    ).first()
+
+    if not session:
+        session = DailySession(
+            user_id=user.id,
+            session_date=today,
+            session_type=st_enum,
+            points_earned=0
+        )
+        db.session.add(session)
+        db.session.commit()
+
+    # Idempotencia
+    existing = ActivityCompletion.query.filter_by(
+        daily_session_id=session.id,
+        activity_id=activity.id
+    ).first()
+
+    if existing:
+        return jsonify({
+            "points_awarded": 0,
+            "points_total": session.points_earned,
+            "already_completed": True
+        }), 200
+
+    # Scoring FINAL
+    source = body.get("source", "today")  # today | catalog
+
+    if is_recommended:
+        points = 20
+    elif source == "catalog":
+        points = 5
+    else:
+        points = 10
+
+    completion = ActivityCompletion(
+        daily_session_id=session.id,
+        activity_id=activity.id,
+        points_awarded=points
+    )
+
+    session.points_earned += points
+
+    db.session.add(completion)
     db.session.commit()
 
     return jsonify({
-        "msg": "activity completed",
-        "completion": activity_completion.serialize()
+        "points_awarded": points,
+        "points_total": session.points_earned,
+        "session_id": session.id,
+        "activity_id": activity.external_id
     }), 201
+
+
+@api.route("/mirror/week", methods=["GET"])
+@jwt_required()
+def mirror_week():
+    user_id = int(get_jwt_identity())
+    today = datetime.now(timezone.utc).date()
+
+    start = today - timedelta(days=6)
+
+    sessions = (
+        DailySession.query
+        .filter(
+            DailySession.user_id == user_id,
+            DailySession.session_date >= start,
+            DailySession.session_date <= today
+        )
+        .all()
+    )
+
+    days = {}
+    for i in range(7):
+        d = start + timedelta(days=i)
+        days[d.isoformat()] = {
+            "date": d.isoformat(),
+            "points": 0,
+            "day": 0,
+            "night": 0,
+        }
+
+    for s in sessions:
+        key = s.session_date.isoformat()
+        days[key]["points"] += s.points_earned or 0
+        if s.session_type == SessionType.day:
+            days[key]["day"] += s.points_earned or 0
+        else:
+            days[key]["night"] += s.points_earned or 0
+
+    return jsonify(list(days.values())), 200
+
+
+# -------------------------
+# SEED-ACTIVITIES (problematic)
+# -------------------------
+
+@api.route("/dev/seed/activities", methods=["POST"])
+def dev_seed_activities():
+    """
+    Endpoint de desarrollo para sembrar categorías y actividades en DB.
+    - No requiere auth (solo dev).
+    - Si ya existen, no duplica.
+    Body opcional:
+      {
+        "categories": [{"name":"...", "description":"..."}],
+        "activities": [{
+          "external_id":"n-journal-1",
+          "category":"Regulación",
+          "name":"Journaling (Noche)",
+          "description":"...",
+          "activity_type":"night"
+        }]
+      }
+    Si no mandas body, inserta un set mínimo para pruebas.
+    """
+    body = request.get_json(silent=True) or {}
+
+    categories_in = body.get("categories")
+    activities_in = body.get("activities")
+
+    # Defaults mínimos si no mandas nada
+    if not categories_in or not activities_in:
+        categories_in = [
+            {"name": "Regulación", "description": "Regular el estado y bajar fricción"},
+            {"name": "Espejo", "description": "Reflexión y seguimiento"},
+            {"name": "Emoción", "description": "Identificación emocional"},
+        ]
+        activities_in = [
+            {
+                "external_id": "n-journal-1",
+                "category": "Regulación",
+                "name": "Journaling (Noche)",
+                "description": "Escribe 3–5 líneas sobre el día.",
+                "activity_type": "night",
+            },
+            {
+                "external_id": "n-rec-emotion-pick",
+                "category": "Emoción",
+                "name": "Selector de emoción (Noche)",
+                "description": "Elige una emoción principal y añade una nota breve.",
+                "activity_type": "night",
+            },
+            {
+                "external_id": "d-mirror-review",
+                "category": "Espejo",
+                "name": "Revisión rápida (Día)",
+                "description": "Revisa tu estado y lo completado.",
+                "activity_type": "day",
+            },
+        ]
+
+    # 1) Crear/obtener categorías
+    cat_map = {}
+    for c in categories_in:
+        name = (c.get("name") or "").strip()
+        if not name:
+            continue
+        existing = ActivityCategory.query.filter_by(name=name).first()
+        if not existing:
+            existing = ActivityCategory(
+                name=name,
+                description=(c.get("description") or "").strip() or None
+            )
+            db.session.add(existing)
+        cat_map[name] = existing
+
+    db.session.commit()
+
+    # 2) Crear/obtener actividades por external_id
+    created = 0
+    updated = 0
+
+    for a in activities_in:
+        ext = (a.get("external_id") or "").strip()
+        if not ext:
+            continue
+
+        cat_name = (a.get("category") or "").strip()
+        category = cat_map.get(cat_name) or ActivityCategory.query.filter_by(
+            name=cat_name).first()
+        if not category:
+            # Si viene una categoría no definida, la creamos
+            category = ActivityCategory(name=cat_name or "General")
+            db.session.add(category)
+            db.session.commit()
+
+        activity = Activity.query.filter_by(external_id=ext).first()
+
+        # activity_type mapping
+        at = (a.get("activity_type") or "both").strip().lower()
+        if at == "day":
+            at_enum = ActivityType.day
+        elif at == "night":
+            at_enum = ActivityType.night
+        else:
+            at_enum = ActivityType.both
+
+        if not activity:
+            activity = Activity(
+                external_id=ext,
+                category_id=category.id,
+                name=(a.get("name") or ext).strip(),
+                description=(a.get("description") or "").strip() or None,
+                activity_type=at_enum,
+                is_active=True
+            )
+            db.session.add(activity)
+            created += 1
+        else:
+            # opcional: actualizar datos básicos si ya existe
+            activity.category_id = category.id
+            activity.name = (a.get("name") or activity.name).strip()
+            activity.description = (
+                a.get("description") or activity.description)
+            activity.activity_type = at_enum
+            activity.is_active = True
+            updated += 1
+
+    db.session.commit()
+
+    return jsonify({
+        "msg": "Seed completado",
+        "created": created,
+        "updated": updated
+    }), 200
+
+
+@api.route("/dev/seed/activities/bulk", methods=["POST"])
+def dev_seed_activities_bulk():
+    body = request.get_json(silent=True) or {}
+    items = body.get("activities") or []
+    if not isinstance(items, list) or not items:
+        return jsonify({"msg": "activities debe ser una lista no vacía"}), 400
+
+    # Cache categorías por nombre
+    cat_cache = {}
+
+    def get_or_create_category(name: str):
+        name = (name or "General").strip()
+        if name in cat_cache:
+            return cat_cache[name]
+        cat = ActivityCategory.query.filter_by(name=name).first()
+        if not cat:
+            cat = ActivityCategory(name=name, description=None)
+            db.session.add(cat)
+            db.session.commit()
+        cat_cache[name] = cat
+        return cat
+
+    created = 0
+    updated = 0
+    skipped = 0
+
+    for a in items:
+        ext = (a.get("id") or "").strip()
+        if not ext:
+            skipped += 1
+            continue
+
+        branch = (a.get("branch") or "General").strip()
+        category = get_or_create_category(branch)
+
+        phase = (a.get("phase") or "").strip().lower()
+        if phase == "day":
+            at_enum = ActivityType.day
+        elif phase == "night":
+            at_enum = ActivityType.night
+        else:
+            at_enum = ActivityType.both
+
+        name = (a.get("title") or ext).strip()
+        desc = (a.get("description") or "").strip() or None
+
+        activity = Activity.query.filter_by(external_id=ext).first()
+        if not activity:
+            activity = Activity(
+                external_id=ext,
+                category_id=category.id,
+                name=name,
+                description=desc,
+                activity_type=at_enum,
+                is_active=True
+            )
+            db.session.add(activity)
+            created += 1
+        else:
+            activity.category_id = category.id
+            activity.name = name
+            activity.description = desc
+            activity.activity_type = at_enum
+            activity.is_active = True
+            updated += 1
+
+    db.session.commit()
+
+    return jsonify({
+        "msg": "Seed bulk completado",
+        "created": created,
+        "updated": updated,
+        "skipped": skipped
+    }), 200
+
+
+# -------------------------
+# DEV-THINGS (problematic)
+# -------------------------
+
+@api.route("/dev/reset/today", methods=["POST"])
+@jwt_required()
+def dev_reset_today():
+    user_id = int(get_jwt_identity())
+    today = datetime.now(timezone.utc).date()
+
+    sessions = DailySession.query.filter_by(
+        user_id=user_id, session_date=today).all()
+    session_ids = [s.id for s in sessions]
+
+    if session_ids:
+        ActivityCompletion.query.filter(ActivityCompletion.daily_session_id.in_(
+            session_ids)).delete(synchronize_session=False)
+        EmotionCheckin.query.filter(EmotionCheckin.daily_session_id.in_(
+            session_ids)).delete(synchronize_session=False)
+        DailySession.query.filter(DailySession.id.in_(
+            session_ids)).delete(synchronize_session=False)
+
+    db.session.commit()
+
+    return jsonify({"msg": "Reset de hoy completado"}), 200
+
+
+# -------------------------
+# TEMPORARILY DISABLED ROUTES
+# (They are currently inconsistent / broken: params, jwt, GET body usage)
+# Re-enable later with a clean contract.
+# -------------------------
+
+# @api.route("/users", methods=["GET"])
+# def get_all_users():
+#     users = User.query.all()
+#     return jsonify([u.serialize() for u in users])
+
+# @api.route("/users/<int:user_id>", methods=["DELETE"])
+# @jwt_required()
+# def delete_user(user_id):
+#     # TODO: decide policy. For now, delete only self, or require admin.
+#     pass
+
+# ... other session/emotion/activity completion routes TODO ...

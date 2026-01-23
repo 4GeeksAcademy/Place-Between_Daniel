@@ -1,3 +1,4 @@
+import { getUserScope } from "./authService";
 // src/front/services/pointsService.js
 // MVP localStorage. Preparado para reemplazar por API sin tocar la UI.
 
@@ -9,7 +10,8 @@ const getDateKey = () => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
-const storageKey = (dateKey) => `pb_points_${dateKey}`;
+
+const storageKey = (dateKey) => `pb_${getUserScope()}_points_${dateKey}`;
 
 /**
  * Estado:
@@ -83,6 +85,7 @@ export function awardPointsOnce({
   source = "today", // "today" | "catalog" | etc.
   isCorrectPhase = true,
   isRecommended = false,
+  overridePoints = null,
 }) {
   const st = loadPointsState(dateKey);
 
@@ -90,7 +93,11 @@ export function awardPointsOnce({
     return { awarded: false, points: 0, total: st.total };
   }
 
-  const points = computePoints({ source, isCorrectPhase, isRecommended });
+  let points = computePoints({ source, isCorrectPhase, isRecommended });
+  // Override manual (útil para testing o casos especiales)
+  if (overridePoints != null) {
+    points = overridePoints;
+  }
 
   const next = {
     total: st.total + points,

@@ -48,14 +48,7 @@ export const ActivityCard = ({
                         Empezar
                     </button>
 
-                    {showCompleteButton && (
-                        <button
-                            className={`btn ${completed ? "btn-outline-success" : "btn-outline-secondary"}`}
-                            onClick={() => onComplete?.(activity)}
-                        >
-                            {completed ? "Marcar como no hecha" : "Marcar completada"}
-                        </button>
-                    )}
+                    
                 </div>
 
                 {activity.reason && (

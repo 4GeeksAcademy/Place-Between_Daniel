@@ -2,6 +2,12 @@ import React, { useMemo, useState } from "react";
 import { ActivityCard } from "../components/ActivityCard";
 import { activitiesCatalog } from "../data/activities";
 
+
+const getBackendUrl = () => {
+	const url = import.meta.env.VITE_BACKEND_URL;
+	return (url || "").replace(/\/$/, "");
+};
+
 /**
  * MVP: Catálogo completo de actividades con filtros
  * - Fase: Día / Noche / Todas
@@ -57,6 +63,63 @@ export const Activities = () => {
 	}, [allActivities, phaseFilter, branchFilter, q]);
 
 	const onStart = (activity) => setActiveActivity(activity);
+
+	const completeActivityBackend = async (activity) => {
+		const token = localStorage.getItem("pb_token");
+		if (!token) return null;
+
+		const BACKEND_URL = getBackendUrl();
+		if (!BACKEND_URL) return null;
+
+		try {
+			const res = await fetch(`${BACKEND_URL}/api/activities/complete`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${token}`,
+				},
+				body: JSON.stringify({
+					external_id: activity.id, // id frontend
+					session_type: activity.phase, // "day" | "night"
+					source: "catalog",            // 🔑 CLAVE
+					is_recommended: false,
+				}),
+			});
+
+			const data = await res.json();
+			if (!res.ok) throw new Error(data?.msg || "Error backend");
+
+			return data;
+		} catch (e) {
+			console.warn("Catalog backend completion failed:", e);
+			return null;
+		}
+	};
+
+	const seedAllActivitiesBackend = async () => {
+		const BACKEND_URL = getBackendUrl();
+		if (!BACKEND_URL) return;
+
+		const day = activitiesCatalog?.day || [];
+		const night = activitiesCatalog?.night || [];
+		const payload = [...day, ...night];
+
+		const res = await fetch(`${BACKEND_URL}/api/dev/seed/activities/bulk`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ activities: payload }),
+		});
+
+		const data = await res.json().catch(() => ({}));
+		if (!res.ok) {
+			console.error("Seed bulk failed:", data);
+			alert(data?.msg || "Seed bulk failed");
+			return;
+		}
+		alert(`Seed OK: created=${data.created}, updated=${data.updated}, skipped=${data.skipped}`);
+	};
+
+
 
 	return (
 		<div className="container py-4 py-lg-5">
@@ -122,6 +185,17 @@ export const Activities = () => {
 				<div className="small text-secondary">
 					Mostrando <span className="fw-semibold">{filtered.length}</span> actividades
 				</div>
+				
+				{/* Solo DEV */}
+				{import.meta.env.DEV && (
+					<button
+						type="button"
+						className="btn btn-sm btn-outline-secondary"
+						onClick={seedAllActivitiesBackend}
+					>
+						DEV: Sembrar catálogo en DB
+					</button>
+				)}
 
 				<button
 					type="button"
@@ -182,8 +256,10 @@ export const Activities = () => {
 									</button>
 									<button
 										className="btn btn-primary"
-										onClick={() => {
-											// En el futuro: aquí navegaríamos al ActivityRunner/Detail y al finalizar se completaría.
+										onClick={async () => {
+											// Intentar backend (5 puntos)
+											await completeActivityBackend(activeActivity);
+
 											setActiveActivity(null);
 										}}
 									>
