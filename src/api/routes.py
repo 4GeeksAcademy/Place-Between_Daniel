@@ -1,3 +1,4 @@
+import os
 from flask import request, jsonify, Blueprint
 from api.models import (
     db,
@@ -17,6 +18,11 @@ from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identi
 
 api = Blueprint("api", __name__)
 CORS(api)
+
+
+def dev_only():
+    # En tu app.py, FLASK_DEBUG=1 implica desarrollo :contentReference[oaicite:4]{index=4}
+    return os.getenv("FLASK_DEBUG") == "1"
 
 
 @api.route("/hello", methods=["POST", "GET"])
@@ -388,139 +394,10 @@ def mirror_week():
 # SEED-ACTIVITIES (problematic)
 # -------------------------
 
-@api.route("/dev/seed/activities", methods=["POST"])
-def dev_seed_activities():
-    """
-    Endpoint de desarrollo para sembrar categorías y actividades en DB.
-    - No requiere auth (solo dev).
-    - Si ya existen, no duplica.
-    Body opcional:
-      {
-        "categories": [{"name":"...", "description":"..."}],
-        "activities": [{
-          "external_id":"n-journal-1",
-          "category":"Regulación",
-          "name":"Journaling (Noche)",
-          "description":"...",
-          "activity_type":"night"
-        }]
-      }
-    Si no mandas body, inserta un set mínimo para pruebas.
-    """
-    body = request.get_json(silent=True) or {}
-
-    categories_in = body.get("categories")
-    activities_in = body.get("activities")
-
-    # Defaults mínimos si no mandas nada
-    if not categories_in or not activities_in:
-        categories_in = [
-            {"name": "Regulación", "description": "Regular el estado y bajar fricción"},
-            {"name": "Espejo", "description": "Reflexión y seguimiento"},
-            {"name": "Emoción", "description": "Identificación emocional"},
-        ]
-        activities_in = [
-            {
-                "external_id": "n-journal-1",
-                "category": "Regulación",
-                "name": "Journaling (Noche)",
-                "description": "Escribe 3–5 líneas sobre el día.",
-                "activity_type": "night",
-            },
-            {
-                "external_id": "n-rec-emotion-pick",
-                "category": "Emoción",
-                "name": "Selector de emoción (Noche)",
-                "description": "Elige una emoción principal y añade una nota breve.",
-                "activity_type": "night",
-            },
-            {
-                "external_id": "d-mirror-review",
-                "category": "Espejo",
-                "name": "Revisión rápida (Día)",
-                "description": "Revisa tu estado y lo completado.",
-                "activity_type": "day",
-            },
-        ]
-
-    # 1) Crear/obtener categorías
-    cat_map = {}
-    for c in categories_in:
-        name = (c.get("name") or "").strip()
-        if not name:
-            continue
-        existing = ActivityCategory.query.filter_by(name=name).first()
-        if not existing:
-            existing = ActivityCategory(
-                name=name,
-                description=(c.get("description") or "").strip() or None
-            )
-            db.session.add(existing)
-        cat_map[name] = existing
-
-    db.session.commit()
-
-    # 2) Crear/obtener actividades por external_id
-    created = 0
-    updated = 0
-
-    for a in activities_in:
-        ext = (a.get("external_id") or "").strip()
-        if not ext:
-            continue
-
-        cat_name = (a.get("category") or "").strip()
-        category = cat_map.get(cat_name) or ActivityCategory.query.filter_by(
-            name=cat_name).first()
-        if not category:
-            # Si viene una categoría no definida, la creamos
-            category = ActivityCategory(name=cat_name or "General")
-            db.session.add(category)
-            db.session.commit()
-
-        activity = Activity.query.filter_by(external_id=ext).first()
-
-        # activity_type mapping
-        at = (a.get("activity_type") or "both").strip().lower()
-        if at == "day":
-            at_enum = ActivityType.day
-        elif at == "night":
-            at_enum = ActivityType.night
-        else:
-            at_enum = ActivityType.both
-
-        if not activity:
-            activity = Activity(
-                external_id=ext,
-                category_id=category.id,
-                name=(a.get("name") or ext).strip(),
-                description=(a.get("description") or "").strip() or None,
-                activity_type=at_enum,
-                is_active=True
-            )
-            db.session.add(activity)
-            created += 1
-        else:
-            # opcional: actualizar datos básicos si ya existe
-            activity.category_id = category.id
-            activity.name = (a.get("name") or activity.name).strip()
-            activity.description = (
-                a.get("description") or activity.description)
-            activity.activity_type = at_enum
-            activity.is_active = True
-            updated += 1
-
-    db.session.commit()
-
-    return jsonify({
-        "msg": "Seed completado",
-        "created": created,
-        "updated": updated
-    }), 200
-
-
 @api.route("/dev/seed/activities/bulk", methods=["POST"])
 def dev_seed_activities_bulk():
+    if not dev_only():
+        return jsonify({"msg": "Not found"}), 404
     body = request.get_json(silent=True) or {}
     items = body.get("activities") or []
     if not isinstance(items, list) or not items:
@@ -602,6 +479,8 @@ def dev_seed_activities_bulk():
 @api.route("/dev/reset/today", methods=["POST"])
 @jwt_required()
 def dev_reset_today():
+    if not dev_only():
+        return jsonify({"msg": "Not found"}), 404
     user_id = int(get_jwt_identity())
     today = datetime.now(timezone.utc).date()
 
@@ -621,6 +500,25 @@ def dev_reset_today():
 
     return jsonify({"msg": "Reset de hoy completado"}), 200
 
+
+@api.route("/dev/activities/deactivate", methods=["POST"])
+def dev_deactivate_activity():
+    if not dev_only():
+        return jsonify({"msg": "Not found"}), 404
+
+    body = request.get_json(silent=True) or {}
+    external_id = (body.get("external_id") or "").strip()
+    if not external_id:
+        return jsonify({"msg": "external_id es obligatorio"}), 400
+
+    activity = Activity.query.filter_by(external_id=external_id).first()
+    if not activity:
+        return jsonify({"msg": "Actividad no encontrada"}), 404
+
+    activity.is_active = False
+    db.session.commit()
+
+    return jsonify({"msg": "Actividad desactivada", "external_id": external_id}), 200
 
 # -------------------------
 # TEMPORARILY DISABLED ROUTES

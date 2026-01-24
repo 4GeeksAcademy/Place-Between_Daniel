@@ -96,31 +96,7 @@ export const Activities = () => {
 		}
 	};
 
-	const seedAllActivitiesBackend = async () => {
-		const BACKEND_URL = getBackendUrl();
-		if (!BACKEND_URL) return;
-
-		const day = activitiesCatalog?.day || [];
-		const night = activitiesCatalog?.night || [];
-		const payload = [...day, ...night];
-
-		const res = await fetch(`${BACKEND_URL}/api/dev/seed/activities/bulk`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ activities: payload }),
-		});
-
-		const data = await res.json().catch(() => ({}));
-		if (!res.ok) {
-			console.error("Seed bulk failed:", data);
-			alert(data?.msg || "Seed bulk failed");
-			return;
-		}
-		alert(`Seed OK: created=${data.created}, updated=${data.updated}, skipped=${data.skipped}`);
-	};
-
-
-
+	
 	return (
 		<div className="container py-4 py-lg-5">
 			<div className="d-flex flex-column flex-lg-row justify-content-between align-items-start gap-3 mb-4">
@@ -186,16 +162,6 @@ export const Activities = () => {
 					Mostrando <span className="fw-semibold">{filtered.length}</span> actividades
 				</div>
 				
-				{/* Solo DEV */}
-				{import.meta.env.DEV && (
-					<button
-						type="button"
-						className="btn btn-sm btn-outline-secondary"
-						onClick={seedAllActivitiesBackend}
-					>
-						DEV: Sembrar catálogo en DB
-					</button>
-				)}
 
 				<button
 					type="button"
