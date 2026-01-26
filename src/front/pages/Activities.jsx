@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityCard } from "../components/ActivityCard";
 import { ActivityRunner } from "../components/ActivityRunner";
+import { useToasts } from "../components/toasts/ToastContext";
+import { normalizePointsResult } from "../services/pointsService";
 
 import { activitiesCatalog } from "../data/activities";
 
@@ -30,6 +32,7 @@ export const Activities = () => {
 	const [branchFilter, setBranchFilter] = useState("all");
 	const [q, setQ] = useState("");
 	const [activeActivity, setActiveActivity] = useState(null);
+	const { pushPointsToast } = useToasts();
 
 	// Datos desde backend
 	const [dbActivities, setDbActivities] = useState([]);
@@ -205,6 +208,15 @@ export const Activities = () => {
 			const data = await res.json().catch(() => ({}));
 			if (!res.ok) throw new Error(data?.msg || "Error backend");
 
+			const toast = normalizePointsResult(data, {
+				source: "catalog",
+				isRecommended: false,
+			});
+
+			if (toast) {
+				pushPointsToast(toast);
+			}
+
 			return data;
 		} catch (e) {
 			console.warn("Catalog backend completion failed:", e);
@@ -325,7 +337,7 @@ export const Activities = () => {
 				))}
 			</div>
 
-			
+
 
 			{activeActivity && (
 				<>

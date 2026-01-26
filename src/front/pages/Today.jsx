@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import { ActivityCard } from "../components/ActivityCard";
 import { ProgressRing } from "../components/ProgressRing";
 import { ActivityRunner } from "../components/ActivityRunner";
-import { PointsToast } from "../components/PointsToast";
+import { useToasts } from "../components/toasts/ToastContext";
 
 import { buildTodaySet } from "../data/todaySelector";
 import { weekdayLabelES } from "../data/weeklyPlan";
@@ -12,7 +12,7 @@ import { activitiesCatalog } from "../data/activities";
 import { getUserScope } from "../services/authService";
 
 // puntos (local)
-import { loadPointsState, awardPointsOnce } from "../services/pointsService";
+import { loadPointsState, awardPointsOnce, normalizePointsResult } from "../services/pointsService";
 
 /*-------------
  *
@@ -121,6 +121,9 @@ export const Today = () => {
     const dateKey = useMemo(() => getDateKey(), []);
     const dayIndex = useMemo(() => new Date().getDay(), []); // 0..6 (Dom..Sáb)
 
+    // Toast global (montado en AppLayout)
+    const { pushPointsToast } = useToasts();
+
     // userScope en state para permitir rehidratación al cambiar usuario en SPA
     const [userScope, setUserScope] = useState(() => getUserScope());
 
@@ -136,7 +139,7 @@ export const Today = () => {
 
     // puntos de hoy (local)
     const [pointsToday, setPointsToday] = useState(() => loadPointsState(dateKey).total);
-    const [lastPointsToast, setLastPointsToast] = useState(null); // {points, reason}
+
 
     // Set congelado (recommendedId + pillarIds)
     const [todaySetIds, setTodaySetIds] = useState(null);
@@ -327,15 +330,17 @@ export const Today = () => {
         });
 
         if (res.awarded) {
+            // Actualiza contador local
             setPointsToday(res.total);
 
-            let reason = "Actividad completada";
-            if (source === "catalog") reason = "Catálogo (bonus reducido)";
-            else if (isCorrectPhase && isRecommended) reason = "Bonus: recomendada en fase correcta";
-            else if (isCorrectPhase) reason = "Hecha en fase correcta";
-            else reason = "Fuera de fase (bonus reducido)";
+            // Normaliza y dispara toast global
+            const toast = normalizePointsResult(
+                // shape local: {awarded, points, total, ...}
+                { ...res },
+                { source, isCorrectPhase, isRecommended }
+            );
 
-            setLastPointsToast({ points: res.points, reason });
+            if (toast) pushPointsToast(toast);
         }
     };
 
@@ -440,14 +445,6 @@ export const Today = () => {
                         </div>
                     </div>
                 </div>
-
-                {/* Toast puntos */}
-                <PointsToast
-                    toast={lastPointsToast}
-                    isNight={isNight}
-                    onClose={() => setLastPointsToast(null)}
-                    durationMs={2200}
-                />
 
                 {/* Recommended */}
                 {recommended ? (
