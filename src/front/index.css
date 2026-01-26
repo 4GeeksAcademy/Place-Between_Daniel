@@ -317,7 +317,7 @@
   color: #f3f5ff;
 }
 .pb-today-night .pb-sub {
-  color: rgba(227, 230, 255, 0.75);
+  color: rgba(227, 230, 255, 0.72);
 }
 
 .pb-today-night .card {
@@ -458,14 +458,14 @@
 }
 
 /* Progress */
-.pb-progress {
+.pb-mirror-progress {
   height: 10px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
   overflow: hidden;
 }
 
-.pb-progress-bar {
+.pb-mirror-progress-bar {
   height: 100%;
   border-radius: 999px;
   background: rgba(168, 92, 255, 0.55);

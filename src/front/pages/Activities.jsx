@@ -325,6 +325,8 @@ export const Activities = () => {
 				))}
 			</div>
 
+			
+
 			{activeActivity && (
 				<>
 					<div className="modal d-block" tabIndex="-1" role="dialog" aria-modal="true">

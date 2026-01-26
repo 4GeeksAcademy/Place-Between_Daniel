@@ -449,10 +449,12 @@ export const Today = () => {
                         aria-live="polite"
                         aria-atomic="true"
                     >
-                        <div className="toast show border-0 shadow-sm">
+                        <div className={`toast show border-0 shadow-sm ${isNight ? "text-bg-dark" : ""}`}>
                             <div className="toast-body">
                                 <div className="fw-semibold">+{lastPointsToast.points} puntos</div>
-                                <div className="small text-secondary">{lastPointsToast.reason}</div>
+                                <div className={`small ${isNight ? "opacity-75" : "text-secondary"}`}>
+                                    {lastPointsToast.reason}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -500,7 +502,7 @@ export const Today = () => {
                 </div>
 
                 {/* Noche: bloque informativo extra (opcional para más adelante) */}
-                {false  && (
+                {false && (
                     <div className="mt-4 mt-lg-5">
                         <div className="card shadow-sm pb-night">
                             <div className="card-body p-4 d-flex flex-column flex-md-row justify-content-between align-items-start gap-3">
