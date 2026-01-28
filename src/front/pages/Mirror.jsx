@@ -146,7 +146,7 @@ export const Mirror = () => {
 
   // Fondo día/noche (solo estética)
   const hour = new Date().getHours();
-  const autoNight = hour >= 20 || hour < 6;
+  const autoNight = hour >= 19 || hour < 6;
   const isNight = phaseParam ? phaseParam === "night" : autoNight;
 
   return (
