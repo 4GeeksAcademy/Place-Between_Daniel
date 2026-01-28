@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from api.service_loops.welcome_user import send_welcome_transactional , LoopsError
 from api.service_loops.reset_password import send_password_reset
+from api.service_loops.verify_email import send_verify_email , LoopsError
 import os
 from werkzeug.security import generate_password_hash
 
@@ -69,10 +70,50 @@ def register():
     db.session.add(user)
     db.session.commit()
 
+    try:
+        transactional_id = os.getenv("LOOPS_WELCOME_TRANSACTIONAL_ID")
+        if not transactional_id:
+            raise LoopsError("Falta LOOPS_WELCOME_TRANSACTIONAL_ID en el .env")
+        
+        print(">>> Loops: enviando welcome a:", user.email)
+        print(">>> Loops: transactional_id:", transactional_id)
+
+        send_welcome_transactional(
+            email=user.email,
+            transactional_id=transactional_id,
+            data=user.username.capitalize()
+        )
+
+    except Exception as e:
+        print("Error Loops (debug):", repr(e))
+
+    try:
+        verify_id = os.getenv("LOOPS_VERIFY_EMAIL_TRANSACTIONAL_ID")
+        if not verify_id:
+            raise LoopsError("Falta LOOPS_VERIFY_EMAIL_TRANSACTIONAL_ID")
+
+        verify_token = create_access_token(
+        identity=str(user.id),
+        expires_delta=timedelta(hours=24)
+        )
+
+        verify_url = "http://localhost:3001/api/verify-email?token=" + verify_token
+
+        send_verify_email(
+            email=user.email,
+            transactional_id=verify_id,
+            username=user.username,
+            url_verify=verify_url
+        )
+
+    except Exception as e:
+        print("Error Loops verify email (debug):", repr(e))
+
     return jsonify({
         "msg": "Usuario creado",
         "user": user.serialize()
     }), 201
+
 
 
 @api.route("/login", methods=["POST"])
@@ -102,6 +143,57 @@ def login():
         "access_token": access_token,
         "user": user.serialize()
     }), 200
+
+#--------------------------
+# PASSWORD RESET
+#--------------------------
+@api.route('/password/reset', methods=['POST'])
+def reset_password():
+    email = request.json.get('email',None)
+
+    if not email:
+        return jsonify({"msg": "email es obligatorio"}), 400
+
+    user = User.query.filter_by(email=email).first()
+
+    if not user:
+        return jsonify({"msg": "Si el email existe, recibirás un enlace para restablecer tu contraseña."}), 404
+
+    token = create_access_token(
+    identity=str(user.id),
+    expires_delta=timedelta(hours=1)
+)
+
+    app_url = "www.google.com" + "/reset?token=" + token
+    
+    send_password_reset(email, app_url)
+
+    return jsonify({"msg": "Si el email existe, recibirás un enlace para restablecer tu contraseña."}), 200
+
+@api.route('/change/password', methods=['POST'])
+@jwt_required()
+def change_password():
+
+    password =request.json.get('password',None)
+
+    user_id = get_jwt_identity()
+    try:
+        user_id_int = int(user_id)
+    except Exception:
+        return jsonify({"msg": "Token inválido (identity)"}), 401
+
+    user = User.query.get(user_id_int)
+    if user is None:
+        return jsonify({"msg": "Usuario no encontrado"}), 404
+
+    if user is None:
+        return jsonify({"msg" :"Usuario no encontrado"}),400
+    
+    user.password_hash = generate_password_hash(password)
+    db.session.add(user)
+    db.session.commit()
+
+    return jsonify({"Success": True}), 200
 
 
 # -------------------------

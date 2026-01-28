@@ -1,31 +1,27 @@
 import os
 import requests
 
-LOOPS_API_KEY = os.getenv("LOOPS_API_KEY")
 LOOPS_BASE_URL = "https://app.loops.so/api/v1"
-url_Frontend = os.getenv('VITE_FRONTEND_URL') + "auth/login"
-
 
 class LoopsError(Exception):
     pass
 
-
 def _headers():
-    if not LOOPS_API_KEY:
+    api_key = os.getenv("LOOPS_API_KEY")
+    if not api_key:
         raise LoopsError("Falta LOOPS_API_KEY en el .env")
     return {
-        "Authorization": f"Bearer {LOOPS_API_KEY}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
 
-
-def send_welcome_transactional(email: str, transactional_id: str, data: str | None = None) -> None:
+def send_verify_email(email: str, transactional_id: str, username: str, url_verify: str) -> None:
     payload = {
         "transactionalId": transactional_id,
         "email": email,
         "dataVariables": {
-            "first_name": data,
-            "url_login": url_Frontend 
+            "username": username,
+            "url_verify": url_verify
         }
     }
 
@@ -37,5 +33,4 @@ def send_welcome_transactional(email: str, transactional_id: str, data: str | No
     )
 
     if r.status_code >= 400:
-        raise LoopsError(
-            f"Loops transactional error {r.status_code}: {r.text}")
+        raise LoopsError(f"Loops transactional error {r.status_code}: {r.text}")
