@@ -901,3 +901,45 @@
 .pb-i-9  { --pb-auraPow: 0.78; }
 .pb-i-10 { --pb-auraPow: 0.90; }
 
+
+/* ===== Modal panel (runner container) ===== */
+.pb-modal-panel {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Night: el panel debe ser oscuro para que el texto claro sea legible */
+.pb-today-night .pb-modal-panel {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Night: inputs legibles dentro del modal */
+.pb-today-night .modal-content .form-control,
+.pb-today-night .modal-content .form-select,
+.pb-today-night .modal-content textarea {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: #f3f5ff !important;
+}
+
+.pb-today-night .modal-content .form-control::placeholder,
+.pb-today-night .modal-content textarea::placeholder {
+  color: rgba(227, 232, 255, 0.55) !important;
+}
+
+.pb-today-night .modal-content .form-label,
+.pb-today-night .modal-content .form-text,
+.pb-today-night .modal-content .small,
+.pb-today-night .modal-content .text-muted {
+  color: rgba(227, 232, 255, 0.75) !important;
+}
+
+/* ===== Runner micro-transitions ===== */
+.pb-fade-in {
+  animation: pbFadeIn 500ms ease-out;
+}
+@keyframes pbFadeIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

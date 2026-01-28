@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { ActivityCard } from "../components/ActivityCard";
 import { ProgressRing } from "../components/ProgressRing";
-import { ActivityRunner } from "../components/ActivityRunner";
+import { ActivityModal } from "../components/ActivityModal";
 import { useToasts } from "../components/toasts/ToastContext";
 
 import { buildTodaySet } from "../data/todaySelector";
@@ -508,80 +508,18 @@ export const Today = () => {
 
                 {/* Modal / Runner */}
                 {activeActivity && (
-                    <>
-                        <div
-                            className="modal d-block"
-                            tabIndex="-1"
-                            role="dialog"
-                            style={{ background: "rgba(0,0,0,0.55)" }}
-                            onClick={() => setActiveActivity(null)}
-                        >
-                            <div
-                                className="modal-dialog modal-dialog-centered"
-                                role="document"
-                                onClick={(e) => e.stopPropagation()}
-                            >
-                                <div className="modal-content">
-                                    <div className="modal-header">
-                                        <h5 className="modal-title">{activeActivity.title}</h5>
-                                        <button
-                                            type="button"
-                                            className="btn-close"
-                                            aria-label="Close"
-                                            onClick={() => setActiveActivity(null)}
-                                        />
-                                    </div>
-
-                                    <div className="modal-body">
-                                        <div className="small text-secondary mb-2">
-                                            {activeActivity.phase === "night" ? "Noche" : "Día"} ·{" "}
-                                            {activeActivity.duration || 5} min · {activeActivity.branch}
-                                        </div>
-                                        <p className="mb-0">{activeActivity.description}</p>
-
-                                        <div className="mt-3 p-3 border rounded bg-dark">
-                                            <div className="fw-semibold mb-2">Ejercicio</div>
-
-                                            <ActivityRunner
-                                                activity={activeActivity}
-                                                onSaved={async () => {
-                                                    // 1) guardar runner (ya hecho dentro), 2) completar actividad (puntos + espejo)
-                                                    await handleComplete(activeActivity);
-                                                    setActiveActivity(null);
-                                                }}
-                                            />
-                                        </div>
-
-                                    </div>
-
-                                    <div className="modal-footer">
-                                        <button
-                                            type="button"
-                                            className="btn btn-outline-secondary"
-                                            onClick={() => setActiveActivity(null)}
-                                        >
-                                            Cerrar
-                                        </button>
-
-                                        {activeActivity.run !== "emotion_checkin" && (
-                                            <button
-                                                type="button"
-                                                className="btn btn-primary"
-                                                onClick={async () => {
-                                                    await handleComplete(activeActivity);
-                                                    setActiveActivity(null);
-                                                }}
-                                            >
-                                                Finalizar y guardar
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="modal-backdrop show" />
-                    </>
+                    <ActivityModal
+                        activity={activeActivity}
+                        onClose={() => setActiveActivity(null)}
+                        onComplete={async () => {
+                            await handleComplete(activeActivity);
+                            setActiveActivity(null);
+                        }}
+                        onSaved={async () => {
+                            await handleComplete(activeActivity);
+                            setActiveActivity(null);
+                        }}
+                    />
                 )}
             </div>
         </div>

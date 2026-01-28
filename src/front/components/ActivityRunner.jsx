@@ -102,6 +102,22 @@ export const ActivityRunner = ({ activity, onSaved }) => {
     const Runner = runnerMap[runType];
     if (!Runner) return <UnimplementedRun type={runType || "—"} />;
 
-    // 4) Ejecuta runner
-    return <Runner activity={activity} run={runNorm} onSaved={onSaved} />;
+    // 4) Wrapper de onSaved (payload normalizado para todos los runners)
+    const onSavedNormalized = (payload) => {
+        // No rompemos callers: si no hay onSaved, no hacemos nada
+        onSaved?.({
+            activity: {
+                id: activity?.id,
+                title: activity?.title,
+                phase: activity?.phase,
+            },
+            run: runNorm,
+            runType,
+            payload: payload ?? null,
+            at: new Date().toISOString(),
+        });
+    };
+
+    // 5) Ejecuta runner
+    return <Runner activity={activity} run={runNorm} onSaved={onSavedNormalized} />;
 };

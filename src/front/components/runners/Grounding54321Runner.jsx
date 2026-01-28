@@ -6,6 +6,10 @@ import React, { useMemo, useState } from "react";
  * - setup: explicación + botón empezar
  * - running: pasos 5-4-3-2-1 con inputs opcionales
  * - outro: cierre suave (frase + mini-check) + "Guardar y volver"
+ *
+ * Refinos:
+ * - Fade suave entre pasos (pb-fade-in)
+ * - Guardado con micro-feedback (no cierre abrupto)
  */
 export const Grounding54321Runner = ({ activity, run, onSaved }) => {
     const steps = useMemo(() => {
@@ -40,9 +44,13 @@ export const Grounding54321Runner = ({ activity, run, onSaved }) => {
     // mini-check final (opcional)
     const [after, setAfter] = useState(""); // "mejor" | "igual" | "peor" | ""
 
+    // refinado: evitar doble click y dar cierre suave
+    const [finishing, setFinishing] = useState(false);
+
     const step = steps[idx];
 
     const updateItem = (stepKey, i, value) => {
+        if (finishing) return;
         setAnswers((prev) => ({
             ...prev,
             [stepKey]: (prev[stepKey] || []).map((v, j) => (j === i ? value : v)),
@@ -50,28 +58,39 @@ export const Grounding54321Runner = ({ activity, run, onSaved }) => {
     };
 
     const next = () => {
+        if (finishing) return;
         if (idx < steps.length - 1) setIdx((n) => n + 1);
         else setStage("outro");
     };
 
-    const prev = () => setIdx((n) => Math.max(n - 1, 0));
+    const prev = () => {
+        if (finishing) return;
+        setIdx((n) => Math.max(n - 1, 0));
+    };
 
     const finish = () => {
-        onSaved?.({
-            type: "thought_cut",
-            variant: run?.variant || "grounding_54321",
-            answers,
-            after, // cómo se siente después (opcional)
-            meta: {
-                steps: steps.map((s) => ({ key: s.key, label: s.label, count: s.count })),
-            },
-        });
+        if (finishing) return;
+
+        setFinishing(true);
+
+        // Micro-feedback antes de cerrar
+        window.setTimeout(() => {
+            onSaved?.({
+                type: "thought_cut",
+                variant: run?.variant || "grounding_54321",
+                answers,
+                after, // cómo se siente después (opcional)
+                meta: {
+                    steps: steps.map((s) => ({ key: s.key, label: s.label, count: s.count })),
+                },
+            });
+        }, 700);
     };
 
     // ---------- UI: SETUP ----------
     if (stage === "setup") {
         return (
-            <div>
+            <div className="pb-fade-in">
                 <div className="mb-2">
                     <div className="fw-semibold">¿En qué consiste?</div>
                     <div className="text-secondary small">
@@ -103,7 +122,8 @@ export const Grounding54321Runner = ({ activity, run, onSaved }) => {
         const progressText = `${idx + 1}/${steps.length}`;
 
         return (
-            <div>
+            // key={idx} fuerza el re-mount del bloque y activa fade en cada paso
+            <div key={idx} className="pb-fade-in">
                 <div className="d-flex justify-content-between align-items-start mb-2">
                     <div>
                         <div className="fw-semibold">{step.label}</div>
@@ -119,18 +139,18 @@ export const Grounding54321Runner = ({ activity, run, onSaved }) => {
                             className="form-control"
                             value={(answers?.[step.key] || [])[i] ?? ""}
                             onChange={(e) => updateItem(step.key, i, e.target.value)}
-                            // Placeholder solo en el primer input para no “repetir ruido”
                             placeholder={i === 0 ? step.placeholder : ""}
+                            disabled={finishing}
                         />
                     ))}
                 </div>
 
                 <div className="d-flex gap-2 mt-3">
-                    <button className="btn btn-outline-secondary flex-fill" onClick={prev} disabled={idx === 0}>
+                    <button className="btn btn-outline-secondary flex-fill" onClick={prev} disabled={idx === 0 || finishing}>
                         Atrás
                     </button>
 
-                    <button className="btn btn-primary flex-fill" onClick={next}>
+                    <button className="btn btn-primary flex-fill" onClick={next} disabled={finishing}>
                         {idx < steps.length - 1 ? "Siguiente" : "Terminar"}
                     </button>
                 </div>
@@ -140,9 +160,9 @@ export const Grounding54321Runner = ({ activity, run, onSaved }) => {
 
     // ---------- UI: OUTRO (cierre suave) ----------
     return (
-        <div>
+        <div className="pb-fade-in">
             <div className="p-3 rounded border bg-body-tertiary">
-                <div className="fw-semibold mb-1">Bien hecho.</div>
+                <div className="fw-semibold mb-1">{finishing ? "Guardando…" : "Bien hecho."}</div>
                 <div className="text-secondary small mb-0">
                     Has traído tu atención al presente. No hace falta “sentirse perfecto” para que esto funcione:
                     a veces solo baja un poco el ruido.
@@ -156,6 +176,7 @@ export const Grounding54321Runner = ({ activity, run, onSaved }) => {
                         type="button"
                         className={`btn flex-fill ${after === "mejor" ? "btn-primary" : "btn-outline-primary"}`}
                         onClick={() => setAfter("mejor")}
+                        disabled={finishing}
                     >
                         Mejor
                     </button>
@@ -163,6 +184,7 @@ export const Grounding54321Runner = ({ activity, run, onSaved }) => {
                         type="button"
                         className={`btn flex-fill ${after === "igual" ? "btn-primary" : "btn-outline-primary"}`}
                         onClick={() => setAfter("igual")}
+                        disabled={finishing}
                     >
                         Igual
                     </button>
@@ -170,6 +192,7 @@ export const Grounding54321Runner = ({ activity, run, onSaved }) => {
                         type="button"
                         className={`btn flex-fill ${after === "peor" ? "btn-primary" : "btn-outline-primary"}`}
                         onClick={() => setAfter("peor")}
+                        disabled={finishing}
                     >
                         Peor
                     </button>
@@ -179,8 +202,8 @@ export const Grounding54321Runner = ({ activity, run, onSaved }) => {
                 </div>
             </div>
 
-            <button className="btn btn-success w-100 mt-3" onClick={finish}>
-                Guardar y volver
+            <button className="btn btn-success w-100 mt-3" onClick={finish} disabled={finishing}>
+                {finishing ? "Guardando…" : "Guardar y volver"}
             </button>
         </div>
     );

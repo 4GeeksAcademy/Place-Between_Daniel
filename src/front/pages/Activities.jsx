@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityCard } from "../components/ActivityCard";
-import { ActivityRunner } from "../components/ActivityRunner";
+import { ActivityModal } from "../components/ActivityModal";
 import { useToasts } from "../components/toasts/ToastContext";
-import { hasRunner } from "../components/runners/runnerRegistry";
 
 import { normalizePointsResult } from "../services/pointsService";
 import { getUserScope } from "../services/authService";
@@ -17,7 +16,7 @@ const getBackendUrl = () => {
 };
 
 const phaseLabel = (phaseKey) => (phaseKey === "night" ? "Noche" : "Día");
-const getRunType = (a) => (typeof a?.run === "string" ? a.run : a?.run?.type);
+
 
 /**
  * Construye un índice rápido del catálogo local por id (external_id).
@@ -103,8 +102,6 @@ export const Activities = () => {
 	// Índice del catálogo local (para enriquecer)
 	const catalogIndex = useMemo(() => buildCatalogIndex(), []);
 
-	// Helper: extrae run.type normalizado de activity
-	const getRunType = (a) => (typeof a?.run === "string" ? a.run : a?.run?.type);
 
 	// 1) Fetch de actividades activas desde DB (requiere JWT)
 	useEffect(() => {
@@ -441,50 +438,19 @@ export const Activities = () => {
 				))}
 			</div>
 
-
-
 			{activeActivity && (
-				<>
-					<div className="modal d-block" tabIndex="-1" role="dialog" aria-modal="true">
-						<div className="modal-dialog modal-dialog-centered" role="document">
-							<div className="modal-content">
-								<div className="modal-header">
-									<h5 className="modal-title">{activeActivity.title}</h5>
-									<button type="button" className="btn-close" onClick={() => setActiveActivity(null)} />
-								</div>
-
-								<div className="modal-body">
-									<p className="text-secondary mb-2">{activeActivity.description}</p>
-
-									<div className="mt-3 p-3 border rounded bg-body-tertiary">
-
-										<ActivityRunner
-											activity={activeActivity}
-											onSaved={async () => {
-												await handleComplete(activeActivity);
-												setActiveActivity(null);
-											}}
-										/>
-									</div>
-								</div>
-
-								{!hasRunner(getRunType(activeActivity)) && (
-									<button
-										className="btn btn-primary"
-										onClick={async () => {
-											await handleComplete(activeActivity);
-											setActiveActivity(null);
-										}}
-									>
-										Empezar ahora
-									</button>
-								)}
-							</div>
-						</div>
-					</div>
-
-					<div className="modal-backdrop show" />
-				</>
+				<ActivityModal
+					activity={activeActivity}
+					onClose={() => setActiveActivity(null)}
+					onComplete={async () => {
+						await handleComplete(activeActivity);
+						setActiveActivity(null);
+					}}
+					onSaved={async () => {
+						await handleComplete(activeActivity);
+						setActiveActivity(null);
+					}}
+				/>
 			)}
 		</div>
 	);

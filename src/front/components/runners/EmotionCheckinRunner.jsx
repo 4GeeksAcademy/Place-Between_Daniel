@@ -13,6 +13,15 @@ const normalize = (s) =>
 // MVP: 4 ramas base (permitimos variantes mínimas)
 const ALLOWED_EMOTION_NAMES = new Set(["alegria", "tristeza", "ira", "miedo"]);
 
+/**
+ * EmotionCheckinRunner
+ * - Carga emociones públicas (/api/emotions)
+ * - Guarda check-in autenticado (/api/emotions/checkin)
+ * - Tras guardar OK, muestra feedback corto (fade) y luego dispara onSaved()
+ *
+ * Props:
+ * - onSaved(payload): el contenedor (Today/Activities) completará la actividad y cerrará el modal
+ */
 export const EmotionCheckinRunner = ({ onSaved }) => {
     const BACKEND_URL = getBackendUrl();
     const token = localStorage.getItem("pb_token"); // necesario SOLO para guardar
@@ -24,7 +33,9 @@ export const EmotionCheckinRunner = ({ onSaved }) => {
     const [emotionId, setEmotionId] = useState("");
     const [intensity, setIntensity] = useState(5); // 1..10
     const [note, setNote] = useState("");
+
     const [saving, setSaving] = useState(false);
+    const [saved, setSaved] = useState(false);
 
     useEffect(() => {
         const load = async () => {
@@ -66,6 +77,9 @@ export const EmotionCheckinRunner = ({ onSaved }) => {
 
     const save = async () => {
         try {
+            // Evita doble submit (por doble click o por latencia)
+            if (saving || saved) return;
+
             setSaving(true);
             setErr(null);
 
@@ -89,11 +103,23 @@ export const EmotionCheckinRunner = ({ onSaved }) => {
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data?.msg || "No se pudo guardar el check-in");
 
-            // Notifica al contenedor (Today/Activities) que ya puede marcar "completado"
-            onSaved?.(data);
+            // 1) Feedback visual breve (suaviza la sensación de “cierre en seco”)
+            setSaved(true);
+
+            // 2) Dispara onSaved tras un delay corto (el contenedor completará + cerrará modal)
+            window.setTimeout(() => {
+                onSaved?.({
+                    type: "emotion_checkin",
+                    emotion_id: Number(emotionId),
+                    intensity: Number(intensity),
+                    note,
+                });
+            }, 700);
         } catch (e) {
             setErr(e?.message || "Error guardando check-in");
         } finally {
+            // OJO: aunque hagamos timeout, no necesitamos mantener "saving" true;
+            // el estado "saved" ya bloquea re-submit y da feedback.
             setSaving(false);
         }
     };
@@ -101,11 +127,18 @@ export const EmotionCheckinRunner = ({ onSaved }) => {
     if (loading) return <div className="text-secondary">Cargando emociones…</div>;
     if (err) return <div className="alert alert-warning mb-0">{err}</div>;
 
+    const locked = saving || saved;
+
     return (
         <div>
             <div className="mb-3">
                 <label className="form-label fw-semibold">¿Qué emoción predomina ahora?</label>
-                <select className="form-select" value={emotionId} onChange={(e) => setEmotionId(e.target.value)}>
+                <select
+                    className="form-select"
+                    value={emotionId}
+                    onChange={(e) => setEmotionId(e.target.value)}
+                    disabled={locked}
+                >
                     {emotions.map((e) => (
                         <option key={e.id} value={e.id}>
                             {e.name}
@@ -113,7 +146,9 @@ export const EmotionCheckinRunner = ({ onSaved }) => {
                     ))}
                 </select>
 
-                {selectedEmotion?.description && <div className="small text-secondary mt-2">{selectedEmotion.description}</div>}
+                {selectedEmotion?.description && (
+                    <div className="small text-secondary mt-2">{selectedEmotion.description}</div>
+                )}
             </div>
 
             <div className="mb-3">
@@ -129,6 +164,7 @@ export const EmotionCheckinRunner = ({ onSaved }) => {
                     step="1"
                     value={intensity}
                     onChange={(e) => setIntensity(Number(e.target.value))}
+                    disabled={locked}
                 />
 
                 <div className="d-flex justify-content-between small text-secondary">
@@ -145,11 +181,18 @@ export const EmotionCheckinRunner = ({ onSaved }) => {
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
                     placeholder="¿Qué lo ha provocado? ¿Qué necesitas?"
+                    disabled={locked}
                 />
             </div>
 
-            <button className="btn btn-primary w-100" onClick={save} disabled={saving}>
-                {saving ? "Guardando…" : "Guardar check-in"}
+            {saved && (
+                <div className="alert alert-success pb-fade-in">
+                    Guardado. Gracias por registrarlo.
+                </div>
+            )}
+
+            <button className="btn btn-primary w-100" onClick={save} disabled={locked}>
+                {saving ? "Guardando…" : saved ? "Guardado" : "Guardar check-in"}
             </button>
         </div>
     );
